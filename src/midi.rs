@@ -307,3 +307,34 @@ pub fn keyboard_key_to_note(c: char) -> Option<u8> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pitch_to_name() {
+        assert_eq!(pitch_to_name(60), "C4");
+        assert_eq!(pitch_to_name(69), "A4");
+        assert_eq!(pitch_to_name(72), "C5");
+        assert_eq!(pitch_to_name(21), "A0");
+        assert_eq!(pitch_to_name(70), "A#4");
+    }
+
+    #[test]
+    fn test_keyboard_key_to_note() {
+        assert_eq!(keyboard_key_to_note('a'), Some(60));
+        assert_eq!(keyboard_key_to_note('s'), Some(62));
+        assert_eq!(keyboard_key_to_note('w'), Some(61));
+        assert_eq!(keyboard_key_to_note('x'), None);
+        assert_eq!(keyboard_key_to_note(';'), Some(76));
+    }
+
+    #[test]
+    fn test_get_cc_name() {
+        assert_eq!(get_cc_name(7), "Volume Fader");
+        assert_eq!(get_cc_name(10), "Stereo Pan");
+        assert_eq!(get_cc_name(74), "Filter Cutoff (Freq)");
+        assert_eq!(get_cc_name(99), "General Purpose Controller");
+    }
+}

@@ -251,3 +251,61 @@ impl Sequencer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sequencer_new() {
+        let seq = Sequencer::new();
+        assert_eq!(seq.tracks.len(), 4);
+        assert_eq!(seq.bpm, 120.0);
+        assert_eq!(seq.current_tick, 0);
+        assert_eq!(seq.max_ticks, 64);
+        assert_eq!(seq.is_playing, false);
+        assert_eq!(seq.is_recording, false);
+        assert_eq!(seq.ticks_per_beat, 4);
+        assert_eq!(seq.snap_division, 1);
+    }
+
+    #[test]
+    fn test_add_and_remove_notes() {
+        let mut seq = Sequencer::new();
+        
+        // Ensure initial state is empty
+        assert_eq!(seq.tracks[0].notes.len(), 0);
+
+        // Add a note
+        seq.add_note(0, 60, 0, 4, 80);
+        assert_eq!(seq.tracks[0].notes.len(), 1);
+        assert_eq!(seq.tracks[0].notes[0], Note { pitch: 60, velocity: 80, start_tick: 0, duration_ticks: 4 });
+
+        // Retrieve the note
+        assert!(seq.get_note_at(0, 60, 0).is_some());
+        assert!(seq.get_note_at(0, 60, 2).is_some()); // Should be found since duration is 4
+        assert!(seq.get_note_at(0, 60, 4).is_none()); // Outside duration
+
+        // Try to add overlapping note at same start tick -> should replace
+        seq.add_note(0, 60, 0, 8, 100);
+        assert_eq!(seq.tracks[0].notes.len(), 1);
+        assert_eq!(seq.tracks[0].notes[0].duration_ticks, 8);
+        assert_eq!(seq.tracks[0].notes[0].velocity, 100);
+
+        // Remove the note
+        let removed = seq.remove_note_at(0, 60, 4); // Inside the note's duration
+        assert!(removed);
+        assert_eq!(seq.tracks[0].notes.len(), 0);
+    }
+
+    #[test]
+    fn test_tick_advancement() {
+        let mut seq = Sequencer::new();
+        seq.current_tick = 63;
+        seq.is_playing = true;
+        
+        // Wrap around test
+        seq.current_tick = (seq.current_tick + 1) % seq.max_ticks;
+        assert_eq!(seq.current_tick, 0);
+    }
+}

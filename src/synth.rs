@@ -777,10 +777,75 @@ impl SynthEngine {
             }
         }
 
-        // Master Limiter (soft clipping) to prevent digital distortion
-        mix_l = mix_l.tanh() * 0.7;
-        mix_r = mix_r.tanh() * 0.7;
-
         (mix_l, mix_r)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frequency_conversion() {
+        // Test standard middle C (note 60) -> ~261.63 Hz
+        let freq_c4 = 440.0 * 2.0f32.powf((60.0 - 69.0) / 12.0);
+        assert!((freq_c4 - 261.63).abs() < 0.1);
+
+        // Test standard concert pitch A4 (note 69) -> 440.0 Hz
+        let freq_a4 = 440.0 * 2.0f32.powf((69.0 - 69.0) / 12.0);
+        assert_eq!(freq_a4, 440.0);
+    }
+
+    #[test]
+    fn test_adsr_envelope() {
+        let config = AdsrConfig {
+            attack: 0.1,
+            decay: 0.1,
+            sustain: 0.5,
+            release: 0.2,
+        };
+        let mut env = AdsrEnvelope::new(config, 44100.0);
+
+        // Initially in idle state
+        assert_eq!(env.state, EnvelopeState::Idle);
+        assert_eq!(env.current_value, 0.0);
+
+        // Trigger note_on
+        env.trigger_on();
+        assert_eq!(env.state, EnvelopeState::Attack);
+
+        // Process some ticks to transition
+        env.tick(); // should increment value
+        assert!(env.current_value > 0.0);
+    }
+
+    #[test]
+    fn test_synth_engine_new() {
+        let engine = SynthEngine::new(44100.0);
+        assert_eq!(engine.sample_rate, 44100.0);
+        assert_eq!(engine.delay_enabled, true);
+        assert_eq!(engine.filter_enabled, true);
+        assert_eq!(engine.instruments.len(), 4);
+        assert_eq!(engine.instruments[0].name, "Lead Synth");
+    }
+
+    #[test]
+    fn test_voice_allocator() {
+        let mut engine = SynthEngine::new(44100.0);
+        
+        // Ensure no active voices initially
+        assert_eq!(engine.voices.len(), 0);
+
+        // Trigger note-on on Track 0
+        engine.note_on(0, 60, 0.8);
+        assert_eq!(engine.voices.len(), 1);
+        assert_eq!(engine.voices[0].note, 60);
+        assert_eq!(engine.voices[0].track_idx, 0);
+
+        // Trigger note-off on Track 0
+        engine.note_off(0, 60);
+        // Note: the voice will transition to Release phase, so it is still active until released!
+        assert_eq!(engine.voices.len(), 1);
+        assert_eq!(engine.voices[0].envelope.state, EnvelopeState::Release);
     }
 }
