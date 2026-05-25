@@ -413,46 +413,59 @@ impl Voice {
 
         match drum_type {
             DrumType::Kick => {
-                // Pitch sweep: fast decay from 150Hz to 45Hz
-                let pitch_decay = (-40.0 * t).exp();
-                let kick_freq = 45.0 + (150.0 - 45.0) * pitch_decay;
+                // Rapid pitch sweep: starts at 180Hz and sweeps down to 48Hz very fast
+                let pitch_decay = (-45.0 * t).exp();
+                let kick_freq = 48.0 + (180.0 - 48.0) * pitch_decay;
+                
                 let step = kick_freq * 2.0 * PI / sample_rate;
                 self.phase = (self.phase + step) % (2.0 * PI);
                 
-                // Sine body
+                // Fundamental sine wave body
                 let body = self.phase.sin();
                 
-                // Attack click (short burst of noise)
-                let click_env = (-150.0 * t).exp();
+                // Attack click: short transient burst of noise
+                let click_env = (-120.0 * t).exp();
                 let click = if click_env > 0.01 {
                     let mut rng = rand::thread_rng();
-                    rng.gen_range(-1.0..1.0) * click_env * 0.3
+                    rng.gen_range(-1.0..1.0) * click_env * 0.25
                 } else {
                     0.0
                 };
 
-                let amp_env = (-10.0 * t).exp();
-                (body + click) * amp_env
+                let amp_env = (-8.0 * t).exp();
+                let raw_kick = (body + click) * amp_env;
+                
+                // Apply warm saturation (soft-clipping) for a thick, premium analog thump!
+                raw_kick.tanh() * 1.2
             }
             DrumType::Snare => {
-                // Snare: pitch-swept tone (180Hz to 90Hz) mixed with bandpass-filtered noise
-                let pitch_decay = (-30.0 * t).exp();
-                let snare_freq = 90.0 + (180.0 - 90.0) * pitch_decay;
+                // Head tone: sweeps from 180Hz to 120Hz
+                let pitch_decay = (-35.0 * t).exp();
+                let snare_freq = 120.0 + (180.0 - 120.0) * pitch_decay;
+                
                 let step = snare_freq * 2.0 * PI / sample_rate;
                 self.phase = (self.phase + step) % (2.0 * PI);
+                
+                let tone_env = (-15.0 * t).exp();
+                let tone = self.phase.sin() * tone_env * 0.35;
 
-                let tone = self.phase.sin() * (-15.0 * t).exp() * 0.3;
-
-                // Noise band
-                let noise_env = (-9.0 * t).exp();
-                let mut rng = rand::thread_rng();
-                let noise = rng.gen_range(-1.0..1.0) * noise_env * 0.4;
-
-                tone + noise
+                // Snare wires (High-passed noise to remove low rumble and make it crisp and snappy)
+                let noise_env = (-7.0 * t).exp();
+                if noise_env > 0.001 {
+                    let mut rng = rand::thread_rng();
+                    let raw_noise = rng.gen_range(-1.0..1.0);
+                    let hp_noise = raw_noise - self.plucked_last_value;
+                    self.plucked_last_value = raw_noise;
+                    
+                    let noise = hp_noise * noise_env * 0.45;
+                    (tone + noise).tanh() * 1.0
+                } else {
+                    tone.tanh() * 1.0
+                }
             }
             DrumType::HiHat => {
-                // Hi-Hat: Short burst of high-pitched noise (approximated by high-pass noise filtering)
-                let hat_env = (-45.0 * t).exp();
+                // Short, snappy envelope for a clean closed hat
+                let hat_env = (-65.0 * t).exp();
                 if hat_env < 0.001 {
                     return 0.0;
                 }
@@ -460,11 +473,17 @@ impl Voice {
                 let mut rng = rand::thread_rng();
                 let raw_noise = rng.gen_range(-1.0..1.0);
 
-                // Emulate high-pass: difference of successive samples
+                // High-pass filter (difference) to keep only the crisp high-frequencies
                 let hp_noise = raw_noise - self.plucked_last_value;
                 self.plucked_last_value = raw_noise;
 
-                hp_noise * hat_env * 0.5
+                // Emulate metallic resonance by mixing a high-frequency component
+                let metal_freq = 8000.0;
+                let step = metal_freq * 2.0 * PI / sample_rate;
+                self.phase = (self.phase + step) % (2.0 * PI);
+                let metallic_component = self.phase.sin() * 0.2;
+
+                ((hp_noise + metallic_component) * hat_env * 0.65).tanh()
             }
         }
     }
