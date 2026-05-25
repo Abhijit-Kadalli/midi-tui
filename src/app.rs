@@ -28,6 +28,7 @@ pub struct App {
     pub recording_rx: std::sync::mpsc::Receiver<MidiRecordEvent>,
     pub recording_tx: std::sync::mpsc::Sender<MidiRecordEvent>,
     pub active_recorded_notes: std::collections::HashMap<u8, (u32, u8)>, // note -> (start_tick, velocity)
+    pub active_virtual_keys: std::collections::HashMap<u8, (std::time::Instant, usize)>, // note -> (last_press_time, track_idx)
 
     // Mouse grid sizing tracker
     pub grid_rendered_area: Rect,
@@ -63,6 +64,7 @@ impl App {
             recording_rx,
             recording_tx,
             active_recorded_notes: std::collections::HashMap::new(),
+            active_virtual_keys: std::collections::HashMap::new(),
             grid_rendered_area: Rect::default(),
         })
     }
@@ -179,8 +181,10 @@ impl App {
                 return false;
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                self.toggle_record();
-                return false;
+                if self.active_tab != ActiveTab::Devices {
+                    self.toggle_record();
+                    return false;
+                }
             }
             KeyCode::Char('e') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.export_midi();
@@ -203,26 +207,21 @@ impl App {
             if let Some(note) = keyboard_key_to_note(c) {
                 let track_idx = self.piano_roll_state.active_track_idx;
                 
-                // Audio note trigger
-                self.audio_engine.synth.lock().unwrap().note_on(track_idx, note, 0.8);
-                
-                // If recording, register note-on event
-                if self.sequencer.is_recording && self.sequencer.is_playing {
-                    self.active_recorded_notes.insert(note, (self.sequencer.current_tick, 100));
-                }
-
-                // Auto note-off after a short duration to emulate key release
-                let synth_clone = Arc::clone(&self.audio_engine.synth);
-                let is_rec = self.sequencer.is_recording;
-                let tx = self.recording_tx.clone();
-
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                    synth_clone.lock().unwrap().note_off(track_idx, note);
-                    if is_rec {
-                        let _ = tx.send(MidiRecordEvent::NoteOff { note });
+                // Update active virtual key repeat timestamp
+                if let Some((last_press, _)) = self.active_virtual_keys.get_mut(&note) {
+                    *last_press = std::time::Instant::now();
+                } else {
+                    // First press: Audio note trigger
+                    self.audio_engine.synth.lock().unwrap().note_on(track_idx, note, 0.8);
+                    
+                    // If recording, register note-on event
+                    if self.sequencer.is_recording && self.sequencer.is_playing {
+                        self.active_recorded_notes.insert(note, (self.sequencer.current_tick, 100));
+                        let _ = self.recording_tx.send(MidiRecordEvent::NoteOn { note, velocity: 100 });
                     }
-                });
+                    
+                    self.active_virtual_keys.insert(note, (std::time::Instant::now(), track_idx));
+                }
 
                 return false;
             }
@@ -257,7 +256,6 @@ impl App {
         }
         self.trigger_toast(if self.sequencer.is_recording { "● RECORDING ARMED" } else { "○ RECORDING MUTED" });
     }
-
     pub fn process_recording_events(&mut self) {
         // Dequeue and process MIDI events recorded on the fly
         while let Ok(event) = self.recording_rx.try_recv() {
@@ -270,10 +268,40 @@ impl App {
                 }
                 MidiRecordEvent::NoteOff { note } => {
                     if let Some((start_tick, velocity)) = self.active_recorded_notes.remove(&note) {
-                        let duration = self.sequencer.current_tick.saturating_sub(start_tick).max(1);
+                        // Calculate duration, correctly accounting for loop wrap-around
+                        let duration = if self.sequencer.current_tick >= start_tick {
+                            self.sequencer.current_tick - start_tick
+                        } else {
+                            (self.sequencer.max_ticks - start_tick) + self.sequencer.current_tick
+                        };
+                        let duration = duration.max(1);
                         self.sequencer.add_note(track_idx, note, start_tick, duration, velocity);
                     }
                 }
+                MidiRecordEvent::ControlChange { controller, value } => {
+                    let _ = (controller, value);
+                }
+            }
+        }
+    }
+
+    pub fn tick_virtual_keys(&mut self) {
+        let now = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(250); // timeout for key repeats (usually 250ms is perfect)
+        
+        let mut keys_to_remove = Vec::new();
+        
+        for (&note, (last_press, track_idx)) in self.active_virtual_keys.iter() {
+            if now.duration_since(*last_press) > timeout {
+                keys_to_remove.push((note, *track_idx));
+            }
+        }
+        
+        for (note, track_idx) in keys_to_remove {
+            self.active_virtual_keys.remove(&note);
+            self.audio_engine.synth.lock().unwrap().note_off(track_idx, note);
+            if self.sequencer.is_recording && self.sequencer.is_playing {
+                let _ = self.recording_tx.send(MidiRecordEvent::NoteOff { note });
             }
         }
     }
@@ -746,6 +774,15 @@ impl App {
                         }
                     }
                 }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.midi_manager.refresh_ports();
+                if self.midi_manager.ports.is_empty() {
+                    self.selected_device_idx = 0;
+                } else if self.selected_device_idx >= self.midi_manager.ports.len() {
+                    self.selected_device_idx = self.midi_manager.ports.len() - 1;
+                }
+                self.trigger_toast("⚡ SCANNING FOR MIDI CONTROLLERS...");
             }
             _ => {}
         }

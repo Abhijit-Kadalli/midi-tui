@@ -114,8 +114,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 2. Process real-time live recording input queues
         app.process_recording_events();
+        
+        // 3. Process active virtual QWERTY keys hold/release debounce ticks
+        app.tick_virtual_keys();
 
-        // 3. Process asynchronous terminal keyboard/mouse inputs
+        // 4. Process asynchronous terminal keyboard/mouse inputs
         let timeout = render_interval
             .checked_sub(last_tick.elapsed())
             .unwrap_or(Duration::from_millis(1));

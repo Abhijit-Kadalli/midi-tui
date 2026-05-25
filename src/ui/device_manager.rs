@@ -24,13 +24,15 @@ pub fn draw_device_manager(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // Audio output summary
-            Constraint::Min(8),     // MIDI inputs list
+            Constraint::Length(7),  // Audio output summary
+            Constraint::Min(6),     // MIDI inputs list
+            Constraint::Length(5),  // MIDI Input Monitor / Live Activity
         ])
         .split(inner_area);
 
     let audio_area = chunks[0];
     let midi_area = chunks[1];
+    let monitor_area = chunks[2];
 
     // 1. Draw Audio Device Info
     let host_name = cpal::default_host().id().name();
@@ -121,17 +123,65 @@ pub fn draw_device_manager(
 
     f.render_widget(list, midi_area);
 
+    // 3. Draw MIDI Input Monitor
+    let monitor_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_SURFACE0))
+        .title(Span::styled(" Real-Time MIDI Input Monitor ", Style::default().fg(COLOR_PEACH).bold()));
+
+    let last_msg = if let Ok(guard) = midi_manager.last_midi_message.lock() {
+        guard.clone()
+    } else {
+        None
+    };
+
+    let monitor_text = if midi_manager.is_connected() {
+        let port_name = midi_manager.connected_port_name.as_ref().map(|s| s.as_str()).unwrap_or("Unknown Device");
+        let display_event = last_msg.unwrap_or_else(|| "Waiting for MIDI input...".to_string());
+        vec![
+            Line::from(vec![
+                Span::styled("  ● ACTIVE  ", Style::default().bg(COLOR_GREEN).fg(COLOR_BASE).bold()),
+                Span::styled(format!("  Connected: {}", port_name), Style::default().fg(COLOR_TEXT).bold()),
+            ]),
+            Line::from(vec![
+                Span::raw("  Latest MIDI Event: "),
+                Span::styled(display_event, Style::default().fg(COLOR_PEACH).bold()),
+            ]),
+        ]
+    } else {
+        vec![
+            Line::from(vec![
+                Span::styled("  ○ OFFLINE  ", Style::default().bg(COLOR_SURFACE0).fg(COLOR_SUBTEXT).bold()),
+                Span::styled("  No hardware MIDI controller connected.", Style::default().fg(COLOR_SUBTEXT)),
+            ]),
+            Line::from(vec![
+                Span::raw("  Status: "),
+                Span::styled("Connect a controller from the list to monitor real-time inputs.", Style::default().fg(COLOR_SUBTEXT).italic()),
+            ]),
+        ]
+    };
+
+    let monitor_p = Paragraph::new(monitor_text)
+        .block(monitor_block)
+        .alignment(Alignment::Left);
+
+    f.render_widget(monitor_p, monitor_area);
+
     // Render instructions footer
-    if !midi_manager.ports.is_empty() {
-        let help_rect = Rect {
-            x: midi_area.x + 2,
-            y: midi_area.y + midi_area.height - 2,
-            width: midi_area.width.saturating_sub(4),
-            height: 1,
-        };
-        let help_text = Paragraph::new("Use UP/DOWN to navigate, ENTER to Connect/Disconnect.")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(COLOR_SUBTEXT).italic());
-        f.render_widget(help_text, help_rect);
-    }
+    let help_rect = Rect {
+        x: area.x + 2,
+        y: area.y + area.height - 2,
+        width: area.width.saturating_sub(4),
+        height: 1,
+    };
+    let help_text_str = if midi_manager.ports.is_empty() {
+        "Press R to Scan/Refresh for MIDI controllers."
+    } else {
+        "Use UP/DOWN to navigate, ENTER to Connect/Disconnect, R to Scan/Refresh."
+    };
+    let help_text = Paragraph::new(help_text_str)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(COLOR_SUBTEXT).italic());
+    f.render_widget(help_text, help_rect);
 }
