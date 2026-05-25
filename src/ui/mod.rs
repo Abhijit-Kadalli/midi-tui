@@ -159,7 +159,7 @@ fn draw_header(f: &mut Frame, area: Rect, active_tab: ActiveTab, sequencer: &Seq
         .split(area);
 
     // 1. Logo
-    let logo = Paragraph::new(Span::styled(" ⚡ MIDI-TUI DAW ", Style::default().fg(COLOR_MAUVE).bold()))
+    let logo = Paragraph::new(Span::styled(" MIDI-TUI ", Style::default().fg(COLOR_MAUVE).bold()))
         .alignment(Alignment::Left);
     f.render_widget(logo, chunks[0]);
 
