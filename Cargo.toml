@@ -1,0 +1,15 @@
+[package]
+name = "midi-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.26"
+crossterm = { version = "0.27", features = ["event-stream"] }
+midir = "0.9"
+cpal = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+rand = "0.8"
+midly = "0.5"
